@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>私家传送站</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+        body {
+            font-family: system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            max-width: 600px;
+            margin: 40px auto;
+            padding: 0 20px;
+            background: #f9f9f9;
+        }
+
+        .card {
+            background: white;
+            border-radius: 16px;
+            padding: 24px;
+            margin-bottom: 24px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05);
+        }
+
+        h2 {
+            margin-top: 0;
+            font-size: 1.5rem;
+        }
+
+        input,
+        textarea,
+        button {
+            width: 100%;
+            padding: 12px;
+            margin: 8px 0;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            font-size: 16px;
+            box-sizing: border-box;
+        }
+
+        button {
+            background-color: #3498db;
+            color: white;
+            border: none;
+            font-weight: bold;
+            cursor: pointer;
+        }
+
+        button:hover {
+            background-color: #2980b9;
+        }
+
+        .result {
+            margin-top: 16px;
+            padding: 12px;
+            background: #f0f7ff;
+            border-radius: 8px;
+            font-size: 14px;
+            word-break: break-all;
+        }
+
+        #imageModal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.9);
+            z-index: 1000;
+            align-items: center;
+            justify-content: center;
+            flex-direction: column;
+        }
+
+        #modalImage {
+            max-width: 90%;
+            max-height: 80%;
+            object-fit: contain;
+        }
+
+        #closeModal {
+            margin-top: 20px;
+            background: white;
+            color: black;
+            border: none;
+            padding: 8px 20px;
+            border-radius: 30px;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="card">
+        <h2>📎 文件互传</h2>
+        <form id="uploadForm" enctype="multipart/form-data">
+            <input type="file" name="file" id="fileInput" required>
+            <button type="submit">上传到电脑</button>
+        </form>
+        <div id="uploadResult" class="result"></div>
+    </div>
+
+    <div class="card">
+        <h2>📋 剪贴板同步</h2>
+        <textarea id="clipText" rows="4" placeholder="在这里粘贴或查看文本..."></textarea>
+        <button id="syncToServer">📤 同步到电脑</button>
+        <button id="loadFromServer">📥 从电脑获取</button>
+        <div id="clipResult" class="result"></div>
+    </div>
+
+    <div class="card">
+        <h2>📁 已上传文件列表</h2>
+        <div id="fileList" class="result">
+            <span style="color: #aaa;">正在加载...</span>
+        </div>
+        <button id="refreshFiles">🔄 刷新列表</button>
+    </div>
+
+    <div id="imageModal">
+        <img id="modalImage">
+        <button id="closeModal">关闭</button>
+    </div>
+
+    <script>
+        // 文件上传逻辑
+        document.getElementById('uploadForm').onsubmit = async (e) => {
+            e.preventDefault();
+            const file = document.getElementById('fileInput').files[0];
+            if (!file) return;
+            const formData = new FormData();
+            formData.append('file', file);
+            const res = await fetch('/upload', { method: 'POST', body: formData });
+            const data = await res.json();
+            document.getElementById('uploadResult').innerHTML = `✅ ${data.filename} 上传成功`;
+        };
+
+        // 剪贴板同步
+        document.getElementById('syncToServer').onclick = async () => {
+            const text = document.getElementById('clipText').value;
+            const res = await fetch('/clipboard', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ content: text }) });
+            const data = await res.json();
+            document.getElementById('clipResult').innerHTML = `📤 ${data.message}`;
+        };
+
+        document.getElementById('loadFromServer').onclick = async () => {
+            const res = await fetch('/clipboard');
+            const data = await res.json();
+            document.getElementById('clipText').value = data.content;
+            document.getElementById('clipResult').innerHTML = `📥 已同步: ${data.content.substring(0, 50)}`;
+        };
+
+        // 获取并显示文件列表
+        async function loadFileList() {
+            const res = await fetch('/files');
+            const data = await res.json();
+            const fileListDiv = document.getElementById('fileList');
+            if (data.files.length === 0) {
+                fileListDiv.innerHTML = '暂无文件';
+                return;
+            }
+            let html = '<div style="display: flex; flex-direction: column; gap: 12px;">';
+            for (let file of data.files) {
+                const encodedFile = encodeURIComponent(file);
+                const isImage = /\.(jpg|jpeg|png|gif|webp|bmp)$/i.test(file);
+                html += `<div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #eee; padding-bottom: 8px;">
+                            <a href="/download/${encodedFile}" style="color:#3498db; text-decoration:none; flex:1; word-break: break-all;">${file}</a>`;
+                if (isImage) {
+                    html += `<button onclick="previewImage('/download/${encodedFile}')" style="background:none; border:1px solid #3498db; color:#3498db; padding:4px 12px; border-radius:20px; margin-left:10px; width:auto;">🔍 预览</button>`;
+                }
+                html += `</div>`;
+            }
+            html += '</div>';
+            fileListDiv.innerHTML = html;
+        }
+
+        // 刷新按钮
+        document.getElementById('refreshFiles').onclick = loadFileList;
+
+        // 页面加载时自动获取一次文件列表
+        loadFileList();
+
+        function previewImage(url) {
+            const modal = document.getElementById('imageModal');
+            const img = document.getElementById('modalImage');
+            img.src = url;
+            modal.style.display = 'flex';
+        }
+
+        document.getElementById('closeModal').onclick = function () {
+            document.getElementById('imageModal').style.display = 'none';
+        }
+
+        // 点击模态框背景也能关闭（可选）
+        document.getElementById('imageModal').onclick = function (e) {
+            if (e.target === this) {
+                this.style.display = 'none';
+            }
+        }
+    </script>
+</body>
+
+</html>
